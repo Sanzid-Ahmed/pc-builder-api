@@ -1,6 +1,4 @@
-# ==========================================
-# AI PC Builder Routes
-# ==========================================
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -9,6 +7,10 @@ from .database import get_connection
 from .gemini import generate_pc_build
 
 
+# ==========================================
+# Build PC Router
+# ==========================================
+
 router = APIRouter(
     prefix="/api",
     tags=["AI PC Builder"]
@@ -16,19 +18,146 @@ router = APIRouter(
 
 
 # ==========================================
-# Request Models
+# Request Structure
 # ==========================================
 
-class BuildRequirements(BaseModel):
+class BuildRequest(BaseModel):
     type: str
-    budget: str
+    budget: float
     priority: str
     ram: str
     storage: str
 
 
-class BuildRequest(BaseModel):
-    requirements: BuildRequirements
+# ==========================================
+# Database Row → Dictionary
+# ==========================================
+
+def product_to_dict(cursor, row):
+
+    columns = [
+        column[0]
+        for column in cursor.description
+    ]
+
+    product = dict(zip(columns, row))
+
+    # Convert Decimal → float
+    for key, value in product.items():
+
+        if isinstance(value, Decimal):
+            product[key] = float(value)
+
+    return product
+
+
+# ==========================================
+# Required PC Categories
+# ==========================================
+
+REQUIRED_CATEGORIES = {
+    "Processor",
+    "Motherboard",
+    "RAM",
+    "RAM (Desktop)",
+    "Graphics Card",
+    "SSD",
+    "Hard Disk Drive",
+    "CPU Cooler",
+    "Power Supply",
+    "Casing",
+}
+
+
+# ==========================================
+# Prepare Gemini Candidates
+# ==========================================
+
+def prepare_candidates(products, budget):
+
+    # ------------------------------------------
+    # Keep only PC Builder categories
+    # ------------------------------------------
+
+    filtered = [
+        product
+        for product in products
+        if product.get("category") in REQUIRED_CATEGORIES
+    ]
+
+    # ------------------------------------------
+    # Remove products without valid prices
+    # ------------------------------------------
+
+    filtered = [
+        product
+        for product in filtered
+        if product.get("price") is not None
+    ]
+
+    # ------------------------------------------
+    # Group products by category
+    # ------------------------------------------
+
+    grouped = {}
+
+    for product in filtered:
+
+        category = product["category"]
+
+        if category not in grouped:
+            grouped[category] = []
+
+        grouped[category].append(product)
+
+    # ------------------------------------------
+    # Approximate budget distribution
+    #
+    # This is NOT the final build.
+    # It only reduces Gemini's input size.
+    # ------------------------------------------
+
+    category_budgets = {
+        "Processor": budget * 0.18,
+        "Motherboard": budget * 0.12,
+        "RAM": budget * 0.08,
+        "RAM (Desktop)": budget * 0.08,
+        "Graphics Card": budget * 0.35,
+        "SSD": budget * 0.08,
+        "Hard Disk Drive": budget * 0.04,
+        "CPU Cooler": budget * 0.04,
+        "Power Supply": budget * 0.08,
+        "Casing": budget * 0.05,
+    }
+
+    candidates = []
+
+    # ------------------------------------------
+    # Select limited candidates per category
+    # ------------------------------------------
+
+    for category, category_products in grouped.items():
+
+        target_budget = category_budgets.get(
+            category,
+            budget
+        )
+
+        # Sort products by distance from
+        # approximate category budget
+        category_products.sort(
+            key=lambda product: abs(
+                float(product["price"]) - target_budget
+            )
+        )
+
+        # Keep only a small number
+        # for Gemini
+        candidates.extend(
+            category_products[:15]
+        )
+
+    return candidates
 
 
 # ==========================================
@@ -43,95 +172,84 @@ def build_pc(request: BuildRequest):
 
     try:
 
-        # ----------------------------------
+        # ------------------------------------------
         # Connect to Database
-        # ----------------------------------
+        # ------------------------------------------
 
         connection = get_connection()
         cursor = connection.cursor()
 
-        # ----------------------------------
+        # ------------------------------------------
         # Get Products
-        # ----------------------------------
+        # ------------------------------------------
 
-        query = """
-            SELECT
-                id,
-                store,
-                name,
-                category,
-                brand,
-                product_code,
-                price,
-                old_price,
-                status,
-                warranty,
-                rating,
-                reviews,
-                url,
-                images,
-                features,
-                specifications,
-                scraped_at
+        cursor.execute("""
+            SELECT *
             FROM products
-            ORDER BY id ASC
-        """
-
-        cursor.execute(query)
+        """)
 
         rows = cursor.fetchall()
 
-        # ----------------------------------
-        # Convert Database Rows
-        # ----------------------------------
-
-        products = []
-
-        for row in rows:
-
-            products.append({
-                "id": row[0],
-                "store": row[1],
-                "name": row[2],
-                "category": row[3],
-                "brand": row[4],
-                "product_code": row[5],
-                "price": float(row[6]) if row[6] is not None else None,
-                "old_price": float(row[7]) if row[7] is not None else None,
-                "status": row[8],
-                "warranty": row[9],
-                "rating": float(row[10]) if row[10] is not None else None,
-                "reviews": row[11],
-                "url": row[12],
-                "images": row[13],
-                "features": row[14],
-                "specifications": row[15],
-                "scraped_at": (
-                    row[16].isoformat()
-                    if row[16] is not None
-                    else None
-                )
-            })
+        products = [
+            product_to_dict(cursor, row)
+            for row in rows
+        ]
 
         if not products:
 
             raise HTTPException(
                 status_code=404,
-                detail="No products available"
+                detail="No products found in database"
             )
 
-        # ----------------------------------
-        # Generate AI Build
-        # ----------------------------------
+        # ------------------------------------------
+        # Prepare User Requirements
+        # ------------------------------------------
 
-        ai_build = generate_pc_build(
-            request.requirements.model_dump(),
-            products
+        requirements = {
+            "type": request.type,
+            "budget": request.budget,
+            "priority": request.priority,
+            "ram": request.ram,
+            "storage": request.storage,
+        }
+
+        # ------------------------------------------
+        # Reduce Product Dataset
+        # ------------------------------------------
+
+        candidates = prepare_candidates(
+            products,
+            request.budget
         )
 
-        # ----------------------------------
+        if not candidates:
+
+            raise HTTPException(
+                status_code=404,
+                detail="No suitable products found"
+            )
+
+        print(
+            f"Total database products: {len(products)}"
+        )
+
+        print(
+            f"Products sent to Gemini: {len(candidates)}"
+        )
+
+        # ------------------------------------------
+        # Ask Gemini
+        # ------------------------------------------
+
+        ai_build = generate_pc_build(
+            requirements,
+            candidates
+        )
+
+        # ------------------------------------------
         # Selected Product IDs
-        # ----------------------------------
+        # ------------------------------------------
 
         selected_ids = [
             ai_build.processor_id,
@@ -145,38 +263,87 @@ def build_pc(request: BuildRequest):
             ai_build.casing_id,
         ]
 
-        # ----------------------------------
-        # Get Actual Products
-        # ----------------------------------
+        # ------------------------------------------
+        # Remove Duplicate IDs
+        # ------------------------------------------
 
-        selected_products = [
-            product
-            for product in products
-            if product["id"] in selected_ids
+        selected_ids = list(
+            dict.fromkeys(selected_ids)
+        )
+
+        # ------------------------------------------
+        # Verify IDs
+        # ------------------------------------------
+
+        candidate_ids = {
+            product["id"]
+            for product in candidates
+        }
+
+        invalid_ids = [
+            product_id
+            for product_id in selected_ids
+            if product_id not in candidate_ids
         ]
 
-        # ----------------------------------
-        # Return Result
-        # ----------------------------------
+        if invalid_ids:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Gemini returned invalid product IDs: "
+                    f"{invalid_ids}"
+                )
+            )
+
+        # ------------------------------------------
+        # Get Selected Products From Database
+        # ------------------------------------------
+
+        placeholders = ",".join(
+            ["%s"] * len(selected_ids)
+        )
+
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM products
+            WHERE id IN ({placeholders})
+            """,
+            tuple(selected_ids)
+        )
+
+        selected_rows = cursor.fetchall()
+
+        selected_products = [
+            product_to_dict(cursor, row)
+            for row in selected_rows
+        ]
+
+        # ------------------------------------------
+        # Return Final Build
+        # ------------------------------------------
 
         return {
             "success": True,
-            "data": {
-                "build": ai_build.model_dump(),
-                "products": selected_products
-            }
+            "requirements": requirements,
+            "build": ai_build.model_dump(),
+            "products": selected_products,
         }
 
     except HTTPException:
         raise
 
-    except Exception as error:
+    except Exception as e:
 
-        print("AI BUILD ERROR:", error)
+        print(
+            "AI PC Builder Error:",
+            str(e)
+        )
 
         raise HTTPException(
             status_code=500,
-            detail=f"AI PC Builder failed: {error}"
+            detail=str(e)
         )
 
     finally:

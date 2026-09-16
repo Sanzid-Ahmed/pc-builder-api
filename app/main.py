@@ -3,7 +3,6 @@
 # ==========================================
 
 from fastapi import FastAPI
-
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import router
@@ -11,7 +10,7 @@ from .build_router import router as build_router
 
 
 # ==========================================
-# Create FastAPI Application
+# Create FastAPI App
 # ==========================================
 
 app = FastAPI(
@@ -22,7 +21,7 @@ app = FastAPI(
 
 
 # ==========================================
-# CORS
+# CORS Configuration
 # ==========================================
 
 app.add_middleware(
@@ -35,11 +34,13 @@ app.add_middleware(
 
 
 # ==========================================
-# Add Routes
+# Include Routers
 # ==========================================
 
+# Existing product APIs
 app.include_router(router)
 
+# AI PC Builder API
 app.include_router(build_router)
 
 
@@ -49,7 +50,6 @@ app.include_router(build_router)
 
 @app.get("/")
 def root():
-
     return {
         "success": True,
         "message": "PC Builder API is running"

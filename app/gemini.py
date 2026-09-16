@@ -1,8 +1,16 @@
 import os
 import json
 
+from dotenv import load_dotenv
 from google import genai
 from pydantic import BaseModel
+
+
+# ==========================================
+# Load Environment Variables
+# ==========================================
+
+load_dotenv()
 
 
 # ==========================================
@@ -39,6 +47,10 @@ client = genai.Client(api_key=api_key)
 
 def generate_pc_build(requirements, products):
 
+    # ------------------------------------------
+    # Make Product Data Small
+    # ------------------------------------------
+
     compact_products = []
 
     for product in products:
@@ -49,15 +61,17 @@ def generate_pc_build(requirements, products):
             "name": product["name"],
             "brand": product.get("brand"),
             "price": product.get("price"),
-            "old_price": product.get("old_price"),
-            "specifications": product.get("specifications"),
         })
+
+    # ------------------------------------------
+    # Create Prompt
+    # ------------------------------------------
 
     prompt = f"""
 You are an AI PC Builder for a computer hardware shop.
 
-Create ONE complete PC build using ONLY the products provided
-in SHOP PRODUCTS.
+Your job is to create ONE complete PC build using ONLY the
+products provided in SHOP PRODUCTS.
 
 USER REQUIREMENTS:
 
@@ -72,29 +86,19 @@ SHOP PRODUCTS:
 IMPORTANT RULES:
 
 1. Select products ONLY from SHOP PRODUCTS.
-
 2. Never invent a product.
-
 3. Return the database ID of every selected product.
-
-4. Create a complete PC build.
-
-5. Consider the user's PC type.
-
+4. Every selected ID MUST exist in SHOP PRODUCTS.
+5. Every component must belong to the correct category.
 6. Respect the user's budget as much as possible.
-
-7. Consider the requested RAM.
-
-8. Consider the requested storage.
-
-9. Consider the user's priority.
-
-10. Try to maintain reasonable hardware compatibility.
-
-11. Prefer a balanced build.
-
-12. Every selected product must belong to the correct category.
-
+7. Consider the user's PC type.
+8. Consider the user's priority.
+9. Consider the requested RAM.
+10. Consider the requested storage.
+11. Try to maintain reasonable hardware compatibility.
+12. Prefer a balanced build.
+13. Do not explain your answer.
+14. Return ONLY the required JSON structure.
 
 REQUIRED COMPONENTS:
 
@@ -107,18 +111,26 @@ Hard Disk Drive
 CPU Cooler
 Power Supply
 Casing
-
-
-Return ONLY the required JSON structure.
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-        config={
-            "response_mime_type": "application/json",
-            "response_schema": PCBuildResponse,
+    # ------------------------------------------
+    # Ask Gemini
+    # ------------------------------------------
+
+    response = client.interactions.create(
+        model="gemini-3.6-flash",
+        input=prompt,
+        response_format={
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": PCBuildResponse.model_json_schema(),
         },
     )
 
-    return PCBuildResponse.model_validate_json(response.text)
+    # ------------------------------------------
+    # Parse Gemini Response
+    # ------------------------------------------
+
+    return PCBuildResponse.model_validate_json(
+        response.output_text
+    )
