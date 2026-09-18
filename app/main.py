@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import router
 from .build_router import router as build_router
+from .user_router import router as user_router
+from .build_limit_router import router as build_limit_router
 
 
 # ==========================================
@@ -15,7 +17,7 @@ from .build_router import router as build_router
 
 app = FastAPI(
     title="PC Builder API",
-    description="Simple API for PC component/product data",
+    description="API for PC component/product data, PC building, user management, and build limits",
     version="1.0.0"
 )
 
@@ -40,8 +42,14 @@ app.add_middleware(
 # Existing product APIs
 app.include_router(router)
 
-# AI PC Builder API
+# PC Builder API
 app.include_router(build_router)
+
+# User API
+app.include_router(user_router)
+
+# Build Limit API
+app.include_router(build_limit_router)
 
 
 # ==========================================
