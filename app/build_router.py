@@ -8,7 +8,10 @@ from pydantic import BaseModel
 from .database import get_connection
 
 
-router = APIRouter(prefix="/api", tags=["PC Builder"])
+router = APIRouter(
+    prefix="/api",
+    tags=["PC Builder"]
+)
 
 
 # ============================================================
@@ -86,7 +89,9 @@ def product_text(product):
 
 
 def is_available(product):
-    status = str(product.get("status", "")).lower().strip()
+    status = str(
+        product.get("status", "")
+    ).lower().strip()
 
     unavailable_words = [
         "out of stock",
@@ -108,7 +113,10 @@ def is_available(product):
 def extract_capacity_gb(product):
     text = product_text(product)
 
+    # --------------------------------------------------------
     # TB
+    # --------------------------------------------------------
+
     tb_matches = re.findall(
         r"(\d+(?:\.\d+)?)\s*(?:tb|t\.b\.)",
         text
@@ -119,14 +127,19 @@ def extract_capacity_gb(product):
 
         for value in tb_matches:
             try:
-                values.append(float(value) * 1024)
+                values.append(
+                    float(value) * 1024
+                )
             except ValueError:
                 pass
 
         if values:
             return max(values)
 
+    # --------------------------------------------------------
     # GB
+    # --------------------------------------------------------
+
     gb_matches = re.findall(
         r"(\d+(?:\.\d+)?)\s*(?:gb|g\.b\.)",
         text
@@ -137,7 +150,9 @@ def extract_capacity_gb(product):
 
         for value in gb_matches:
             try:
-                values.append(float(value))
+                values.append(
+                    float(value)
+                )
             except ValueError:
                 pass
 
@@ -150,23 +165,33 @@ def extract_capacity_gb(product):
 def requested_capacity_gb(value):
     text = str(value).lower()
 
+    # --------------------------------------------------------
     # TB
+    # --------------------------------------------------------
+
     tb_match = re.search(
         r"(\d+(?:\.\d+)?)\s*(?:tb|t\.b\.)",
         text
     )
 
     if tb_match:
-        return float(tb_match.group(1)) * 1024
+        return float(
+            tb_match.group(1)
+        ) * 1024
 
+    # --------------------------------------------------------
     # GB
+    # --------------------------------------------------------
+
     gb_match = re.search(
         r"(\d+(?:\.\d+)?)\s*(?:gb|g\.b\.)",
         text
     )
 
     if gb_match:
-        return float(gb_match.group(1))
+        return float(
+            gb_match.group(1)
+        )
 
     return None
 
@@ -182,43 +207,125 @@ def storage_requires_hdd(storage):
 
 
 # ============================================================
-# CPU / MOTHERBOARD PLATFORM
+# CPU / MOTHERBOARD SOCKET COMPATIBILITY
 # ============================================================
 
-def detect_platform(product):
+def cpu_socket(product):
     text = product_text(product)
 
-    intel_words = [
+    # ========================================================
+    # AMD AM5
+    # ========================================================
+
+    if any(x in text for x in [
+        "ryzen 9000",
+        "ryzen 8000",
+        "ryzen 7000",
+        "9900x3d",
+        "9950x",
+        "9900x",
+        "9800x3d",
+        "9700x",
+        "9600x",
+    ]):
+        return "am5"
+
+    # ========================================================
+    # AMD AM4
+    # ========================================================
+
+    if any(x in text for x in [
+        "ryzen 5000",
+        "ryzen 4000",
+        "ryzen 3000",
+        "ryzen 2000",
+        "ryzen 1000",
+        "ryzen 5 5600",
+        "ryzen 5 3600",
+        "ryzen 7 3700",
+        "ryzen 9 3900",
+    ]):
+        return "am4"
+
+    # ========================================================
+    # INTEL
+    # ========================================================
+
+    if "lga1700" in text:
+        return "lga1700"
+
+    if "lga1200" in text:
+        return "lga1200"
+
+    if "lga1151" in text:
+        return "lga1151"
+
+    if "lga1150" in text:
+        return "lga1150"
+
+    return "unknown"
+
+
+def motherboard_socket(product):
+    text = product_text(product)
+
+    # ========================================================
+    # Intel
+    # ========================================================
+
+    if "lga1700" in text:
+        return "lga1700"
+
+    if "lga1200" in text:
+        return "lga1200"
+
+    if "lga1151" in text:
+        return "lga1151"
+
+    if "lga1150" in text:
+        return "lga1150"
+
+    # ========================================================
+    # AMD
+    # ========================================================
+
+    if "am5" in text:
+        return "am5"
+
+    if "am4" in text:
+        return "am4"
+
+    return "unknown"
+
+
+def detect_platform(product):
+    socket = cpu_socket(product)
+
+    if socket.startswith("lga"):
+        return "intel"
+
+    if socket in [
+        "am4",
+        "am5"
+    ]:
+        return "amd"
+
+    text = product_text(product)
+
+    if any(x in text for x in [
         "intel",
         "core i3",
         "core i5",
         "core i7",
         "core i9",
-        "lga",
-    ]
+    ]):
+        return "intel"
 
-    amd_words = [
+    if any(x in text for x in [
         "amd",
         "ryzen",
         "athlon",
-        "am4",
-        "am5",
-    ]
-
-    has_intel = any(
-        word in text
-        for word in intel_words
-    )
-
-    has_amd = any(
-        word in text
-        for word in amd_words
-    )
-
-    if has_intel and not has_amd:
-        return "intel"
-
-    if has_amd and not has_intel:
+    ]):
         return "amd"
 
     return "unknown"
@@ -226,17 +333,26 @@ def detect_platform(product):
 
 def motherboard_compatible(
     motherboard,
-    cpu_platform
+    cpu
 ):
-    if cpu_platform == "unknown":
+    cpu_socket_type = cpu_socket(cpu)
+
+    motherboard_socket_type = motherboard_socket(
+        motherboard
+    )
+
+    # If either socket is unknown,
+    # don't reject the combination.
+    if (
+        cpu_socket_type == "unknown"
+        or motherboard_socket_type == "unknown"
+    ):
         return True
 
-    platform = detect_platform(motherboard)
-
-    if platform == "unknown":
-        return True
-
-    return platform == cpu_platform
+    return (
+        cpu_socket_type
+        == motherboard_socket_type
+    )
 
 
 # ============================================================
@@ -261,17 +377,25 @@ def cpu_score(product):
     ]
 
     for pattern, points in patterns:
-        if re.search(pattern, text):
+
+        if re.search(
+            pattern,
+            text
+        ):
             score += points
             break
 
+    # ========================================================
     # Newer Intel generation bonus
+    # ========================================================
+
     intel_generation_matches = re.findall(
         r"\bi[3579][-\s]?([1-9][0-9]{2,3})\b",
         text
     )
 
     if intel_generation_matches:
+
         try:
             model_number = max(
                 int(x)
@@ -280,21 +404,27 @@ def cpu_score(product):
 
             if model_number >= 14000:
                 score += 20
+
             elif model_number >= 12000:
                 score += 15
+
             elif model_number >= 10000:
                 score += 10
 
         except ValueError:
             pass
 
+    # ========================================================
     # Ryzen generation bonus
+    # ========================================================
+
     ryzen_matches = re.findall(
         r"ryzen\s*[3579]\s*(\d{4})",
         text
     )
 
     if ryzen_matches:
+
         try:
             generation_number = max(
                 int(x)
@@ -303,8 +433,10 @@ def cpu_score(product):
 
             if generation_number >= 7000:
                 score += 20
+
             elif generation_number >= 5000:
                 score += 15
+
             elif generation_number >= 3000:
                 score += 10
 
@@ -341,7 +473,6 @@ def gpu_score(product):
         ("rx 7800", 115),
         ("rx 7700", 105),
         ("rx 7600", 90),
-
         ("rx 6700", 90),
         ("rx 6600", 75),
 
@@ -349,6 +480,7 @@ def gpu_score(product):
     ]
 
     for name, points in gpu_patterns:
+
         if name in text:
             return points
 
@@ -379,9 +511,13 @@ def capacity_products(
     matching = []
 
     for product in products:
-        capacity = extract_capacity_gb(product)
+
+        capacity = extract_capacity_gb(
+            product
+        )
 
         if capacity is not None:
+
             if capacity >= required_capacity:
                 matching.append(product)
 
@@ -389,6 +525,7 @@ def capacity_products(
 
 
 def available_first(products):
+
     if not products:
         return []
 
@@ -407,12 +544,17 @@ def available_first(products):
 
 
 def cheapest(products):
-    products = valid_products(products)
+
+    products = valid_products(
+        products
+    )
 
     if not products:
         return None
 
-    products = available_first(products)
+    products = available_first(
+        products
+    )
 
     return min(
         products,
@@ -428,6 +570,7 @@ def get_candidates(
     products,
     kind=None,
     required_capacity=None,
+    target_price=None,
     limit=12
 ):
     products = capacity_products(
@@ -438,11 +581,41 @@ def get_candidates(
     if not products:
         return []
 
-    products = available_first(products)
+    products = available_first(
+        products
+    )
 
-    # --------------------------------------------------------
+    # ========================================================
+    # PRICE FILTER
+    # ========================================================
+
+    if (
+        target_price is not None
+        and target_price > 0
+    ):
+
+        min_price = target_price * 0.70
+        max_price = target_price * 1.30
+
+        price_filtered = [
+            product
+            for product in products
+            if (
+                min_price
+                <= safe_price(product)
+                <= max_price
+            )
+        ]
+
+        # Only apply the price filter if
+        # at least one product exists inside
+        # the target range.
+        if price_filtered:
+            products = price_filtered
+
+    # ========================================================
     # CPU
-    # --------------------------------------------------------
+    # ========================================================
 
     if kind == "cpu":
 
@@ -460,16 +633,22 @@ def get_candidates(
         merged = {}
 
         for product in cheapest_products:
-            merged[product["id"]] = product
+            merged[
+                product["id"]
+            ] = product
 
         for product in powerful_products:
-            merged[product["id"]] = product
+            merged[
+                product["id"]
+            ] = product
 
-        return list(merged.values())[:limit]
+        return list(
+            merged.values()
+        )[:limit]
 
-    # --------------------------------------------------------
+    # ========================================================
     # GPU
-    # --------------------------------------------------------
+    # ========================================================
 
     if kind == "gpu":
 
@@ -487,16 +666,22 @@ def get_candidates(
         merged = {}
 
         for product in cheapest_products:
-            merged[product["id"]] = product
+            merged[
+                product["id"]
+            ] = product
 
         for product in powerful_products:
-            merged[product["id"]] = product
+            merged[
+                product["id"]
+            ] = product
 
-        return list(merged.values())[:limit]
+        return list(
+            merged.values()
+        )[:limit]
 
-    # --------------------------------------------------------
-    # Other components
-    # --------------------------------------------------------
+    # ========================================================
+    # OTHER COMPONENTS
+    # ========================================================
 
     return sorted(
         products,
@@ -512,14 +697,25 @@ def generate_local_build(
     grouped,
     request
 ):
+
     start_time = time.time()
 
-    budget = float(request.budget)
+    budget = float(
+        request.budget
+    )
 
-    print("==========================================")
-    print("LOCAL BUILD GENERATION")
-    print("Gemini is NOT being used.")
-    print("==========================================")
+    print(
+        "=========================================="
+    )
+    print(
+        "LOCAL BUILD GENERATION"
+    )
+    print(
+        "Gemini is NOT being used."
+    )
+    print(
+        "=========================================="
+    )
 
     ram_capacity = requested_capacity_gb(
         request.ram
@@ -545,13 +741,18 @@ def generate_local_build(
     ram_candidates = get_candidates(
         ram_products,
         required_capacity=ram_capacity,
+        target_price=budget * 0.08,
         limit=8
     )
 
     if not ram_candidates:
+
         raise HTTPException(
             status_code=400,
-            detail=f"No RAM matching {request.ram} was found."
+            detail=(
+                f"No RAM matching "
+                f"{request.ram} was found."
+            )
         )
 
     # ========================================================
@@ -561,13 +762,18 @@ def generate_local_build(
     ssd_candidates = get_candidates(
         grouped.get("SSD", []),
         required_capacity=storage_capacity,
+        target_price=budget * 0.06,
         limit=8
     )
 
     if not ssd_candidates:
+
         raise HTTPException(
             status_code=400,
-            detail=f"No SSD matching {request.storage} was found."
+            detail=(
+                f"No SSD matching "
+                f"{request.storage} was found."
+            )
         )
 
     # ========================================================
@@ -579,14 +785,22 @@ def generate_local_build(
     if wants_hdd:
 
         hdd_candidates = get_candidates(
-            grouped.get("Hard Disk Drive", []),
+            grouped.get(
+                "Hard Disk Drive",
+                []
+            ),
+            target_price=budget * 0.06,
             limit=6
         )
 
         if not hdd_candidates:
+
             raise HTTPException(
                 status_code=400,
-                detail="No suitable Hard Disk Drive was found."
+                detail=(
+                    "No suitable Hard Disk "
+                    "Drive was found."
+                )
             )
 
     # ========================================================
@@ -594,7 +808,11 @@ def generate_local_build(
     # ========================================================
 
     cooler_candidates = get_candidates(
-        grouped.get("CPU Cooler", []),
+        grouped.get(
+            "CPU Cooler",
+            []
+        ),
+        target_price=budget * 0.05,
         limit=8
     )
 
@@ -603,7 +821,11 @@ def generate_local_build(
     # ========================================================
 
     psu_candidates = get_candidates(
-        grouped.get("Power Supply", []),
+        grouped.get(
+            "Power Supply",
+            []
+        ),
+        target_price=budget * 0.07,
         limit=8
     )
 
@@ -612,7 +834,11 @@ def generate_local_build(
     # ========================================================
 
     casing_candidates = get_candidates(
-        grouped.get("Casing", []),
+        grouped.get(
+            "Casing",
+            []
+        ),
+        target_price=budget * 0.06,
         limit=8
     )
 
@@ -621,17 +847,30 @@ def generate_local_build(
     # ========================================================
 
     motherboard_products = valid_products(
-        grouped.get("Motherboard", [])
+        grouped.get(
+            "Motherboard",
+            []
+        )
     )
 
     motherboard_products = available_first(
         motherboard_products
     )
 
+    motherboard_products = get_candidates(
+        motherboard_products,
+        target_price=budget * 0.08,
+        limit=12
+    )
+
     if not motherboard_products:
+
         raise HTTPException(
             status_code=400,
-            detail="No suitable Motherboard was found."
+            detail=(
+                "No suitable Motherboard "
+                "was found."
+            )
         )
 
     # ========================================================
@@ -639,15 +878,23 @@ def generate_local_build(
     # ========================================================
 
     cpu_candidates = get_candidates(
-        grouped.get("Processor", []),
+        grouped.get(
+            "Processor",
+            []
+        ),
         kind="cpu",
+        target_price=budget * 0.25,
         limit=14
     )
 
     if not cpu_candidates:
+
         raise HTTPException(
             status_code=400,
-            detail="No suitable Processor was found."
+            detail=(
+                "No suitable Processor "
+                "was found."
+            )
         )
 
     # ========================================================
@@ -655,15 +902,23 @@ def generate_local_build(
     # ========================================================
 
     gpu_candidates = get_candidates(
-        grouped.get("Graphics Card", []),
+        grouped.get(
+            "Graphics Card",
+            []
+        ),
         kind="gpu",
+        target_price=budget * 0.35,
         limit=14
     )
 
     if not gpu_candidates:
+
         raise HTTPException(
             status_code=400,
-            detail="No suitable Graphics Card was found."
+            detail=(
+                "No suitable Graphics Card "
+                "was found."
+            )
         )
 
     # ========================================================
@@ -693,6 +948,7 @@ def generate_local_build(
     cheapest_hdd = None
 
     if wants_hdd:
+
         cheapest_hdd = cheapest(
             hdd_candidates
         )
@@ -704,18 +960,23 @@ def generate_local_build(
         cheapest_psu,
         cheapest_casing
     ]):
+
         raise HTTPException(
             status_code=400,
             detail=(
-                "Some required PC components are "
-                "missing from the database."
+                "Some required PC components "
+                "are missing from the database."
             )
         )
 
     if wants_hdd and not cheapest_hdd:
+
         raise HTTPException(
             status_code=400,
-            detail="No suitable Hard Disk Drive was found."
+            detail=(
+                "No suitable Hard Disk "
+                "Drive was found."
+            )
         )
 
     # ========================================================
@@ -738,14 +999,12 @@ def generate_local_build(
 
     for cpu in cpu_candidates:
 
-        cpu_platform = detect_platform(cpu)
-
         compatible = [
             motherboard
             for motherboard in motherboard_products
             if motherboard_compatible(
                 motherboard,
-                cpu_platform
+                cpu
             )
         ]
 
@@ -763,30 +1022,35 @@ def generate_local_build(
     # ========================================================
 
     best_build = None
+
     best_score = float("-inf")
 
     combinations_checked = 0
 
     for cpu in cpu_candidates:
 
-        cpu_price = safe_price(cpu)
+        cpu_price = safe_price(
+            cpu
+        )
 
         if cpu_price is None:
             continue
 
-        compatible_motherboards = motherboard_cache.get(
-            cpu.get("id"),
-            []
+        compatible_motherboards = (
+            motherboard_cache.get(
+                cpu.get("id"),
+                []
+            )
         )
 
         if not compatible_motherboards:
             continue
 
-        cpu_platform = detect_platform(cpu)
-
         for gpu in gpu_candidates:
 
-            gpu_price = safe_price(gpu)
+            gpu_price = safe_price(
+                gpu
+            )
 
             if gpu_price is None:
                 continue
@@ -796,22 +1060,44 @@ def generate_local_build(
             # ------------------------------------------------
 
             minimum_without_motherboard = (
+
                 cpu_price
+
                 + gpu_price
-                + safe_price(cheapest_ram)
-                + safe_price(cheapest_ssd)
-                + safe_price(cheapest_cooler)
-                + safe_price(cheapest_psu)
-                + safe_price(cheapest_casing)
+
+                + safe_price(
+                    cheapest_ram
+                )
+
+                + safe_price(
+                    cheapest_ssd
+                )
+
+                + safe_price(
+                    cheapest_cooler
+                )
+
+                + safe_price(
+                    cheapest_psu
+                )
+
+                + safe_price(
+                    cheapest_casing
+                )
             )
 
             if wants_hdd:
-                minimum_without_motherboard += safe_price(
-                    cheapest_hdd
+
+                minimum_without_motherboard += (
+                    safe_price(
+                        cheapest_hdd
+                    )
                 )
 
-            # Even the cheapest motherboard cannot fit
-            # if this amount is already over budget.
+            # ------------------------------------------------
+            # Cheapest compatible motherboard
+            # ------------------------------------------------
+
             cheapest_motherboard_price = safe_price(
                 compatible_motherboards[0]
             )
@@ -850,6 +1136,7 @@ def generate_local_build(
                 ]
 
                 if wants_hdd:
+
                     components.append(
                         cheapest_hdd
                     )
@@ -870,8 +1157,13 @@ def generate_local_build(
                 # Performance
                 # ------------------------------------------------
 
-                cpu_performance = cpu_score(cpu)
-                gpu_performance = gpu_score(gpu)
+                cpu_performance = cpu_score(
+                    cpu
+                )
+
+                gpu_performance = gpu_score(
+                    gpu
+                )
 
                 spending = (
                     total / budget
@@ -889,6 +1181,7 @@ def generate_local_build(
                         "maximum" in priority
                         or "performance" in priority
                     ):
+
                         score = (
                             gpu_performance * 100
                             + cpu_performance * 50
@@ -896,6 +1189,7 @@ def generate_local_build(
                         )
 
                     else:
+
                         score = (
                             gpu_performance * 80
                             + cpu_performance * 40
@@ -934,6 +1228,7 @@ def generate_local_build(
                     }
 
                     if wants_hdd:
+
                         best_build[
                             "Hard Disk Drive"
                         ] = cheapest_hdd
@@ -943,12 +1238,14 @@ def generate_local_build(
     # ========================================================
 
     if best_build is None:
+
         raise HTTPException(
             status_code=400,
             detail=(
-                "No complete PC build can fit within "
-                "this budget with the selected RAM "
-                "and storage requirements."
+                "No complete PC build can fit "
+                "within this budget with the "
+                "selected RAM and storage "
+                "requirements."
             )
         )
 
@@ -963,9 +1260,17 @@ def generate_local_build(
 
     elapsed = time.time() - start_time
 
-    print("==========================================")
-    print("BUILD SELECTED")
-    print("==========================================")
+    print(
+        "=========================================="
+    )
+
+    print(
+        "BUILD SELECTED"
+    )
+
+    print(
+        "=========================================="
+    )
 
     for category, product in best_build.items():
 
@@ -975,7 +1280,10 @@ def generate_local_build(
             f"৳{safe_price(product):,.0f}"
         )
 
-    print("------------------------------------------")
+    print(
+        "------------------------------------------"
+    )
+
     print(
         f"Total: ৳{total_price:,.0f}"
     )
@@ -994,7 +1302,9 @@ def generate_local_build(
         f"{elapsed:.2f} seconds"
     )
 
-    print("==========================================")
+    print(
+        "=========================================="
+    )
 
     return best_build
 
@@ -1007,9 +1317,13 @@ def validate_build(
     build,
     request
 ):
-    budget = float(request.budget)
+
+    budget = float(
+        request.budget
+    )
 
     if not build:
+
         raise HTTPException(
             status_code=400,
             detail="Build generation failed."
@@ -1025,9 +1339,13 @@ def validate_build(
     ]
 
     if len(ids) != len(set(ids)):
+
         raise HTTPException(
             status_code=400,
-            detail="Build contains duplicate products."
+            detail=(
+                "Build contains duplicate "
+                "products."
+            )
         )
 
     # ========================================================
@@ -1036,12 +1354,18 @@ def validate_build(
 
     for category, product in build.items():
 
-        price = safe_price(product)
+        price = safe_price(
+            product
+        )
 
         if price is None:
+
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid price for {category}."
+                detail=(
+                    f"Invalid price for "
+                    f"{category}."
+                )
             )
 
     # ========================================================
@@ -1054,6 +1378,7 @@ def validate_build(
     )
 
     if total > budget:
+
         raise HTTPException(
             status_code=400,
             detail=(
@@ -1072,24 +1397,16 @@ def validate_build(
         and "Motherboard" in build
     ):
 
-        cpu_platform = detect_platform(
+        if not motherboard_compatible(
+            build["Motherboard"],
             build["Processor"]
-        )
-
-        motherboard_platform = detect_platform(
-            build["Motherboard"]
-        )
-
-        if (
-            cpu_platform != "unknown"
-            and motherboard_platform != "unknown"
-            and cpu_platform != motherboard_platform
         ):
+
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "Processor and motherboard "
-                    "platform are incompatible."
+                    "sockets are incompatible."
                 )
             )
 
@@ -1114,12 +1431,14 @@ def validate_build(
             actual_ram is not None
             and actual_ram < required_ram
         ):
+
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Selected RAM is only "
                     f"{actual_ram:.0f}GB, but "
-                    f"{required_ram:.0f}GB was requested."
+                    f"{required_ram:.0f}GB was "
+                    f"requested."
                 )
             )
 
@@ -1144,12 +1463,14 @@ def validate_build(
             actual_storage is not None
             and actual_storage < required_storage
         ):
+
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Selected SSD is only "
                     f"{actual_storage:.0f}GB, but "
-                    f"{required_storage:.0f}GB was requested."
+                    f"{required_storage:.0f}GB was "
+                    f"requested."
                 )
             )
 
@@ -1162,6 +1483,7 @@ def validate_build(
 def build_pc(
     request: BuildRequest
 ):
+
     start_time = time.time()
 
     connection = None
@@ -1173,11 +1495,21 @@ def build_pc(
         # DATABASE CONNECTION
         # ====================================================
 
-        print("==========================================")
-        print("PC BUILD REQUEST")
-        print("==========================================")
+        print(
+            "=========================================="
+        )
 
-        print("Connecting to database...")
+        print(
+            "PC BUILD REQUEST"
+        )
+
+        print(
+            "=========================================="
+        )
+
+        print(
+            "Connecting to database..."
+        )
 
         connection = get_connection()
 
@@ -1194,7 +1526,9 @@ def build_pc(
             dictionary=True
         )
 
-        print("Fetching products...")
+        print(
+            "Fetching products..."
+        )
 
         cursor.execute(
             """
@@ -1206,8 +1540,8 @@ def build_pc(
         products = cursor.fetchall()
 
         print(
-            f"Fetched {len(products)} products in "
-            f"{time.time() - start_time:.2f}s"
+            f"Fetched {len(products)} products "
+            f"in {time.time() - start_time:.2f}s"
         )
 
         # ====================================================
@@ -1224,17 +1558,24 @@ def build_pc(
         # GROUP PRODUCTS
         # ====================================================
 
-        print("Grouping products...")
+        print(
+            "Grouping products..."
+        )
 
         grouped = {}
 
-        for category, category_names in CATEGORY_FIELD_MAP.items():
+        for category, category_names in (
+            CATEGORY_FIELD_MAP.items()
+        ):
 
             grouped[category] = [
                 product
                 for product in products
                 if str(
-                    product.get("category", "")
+                    product.get(
+                        "category",
+                        ""
+                    )
                 ).strip()
                 in category_names
             ]
@@ -1289,9 +1630,13 @@ def build_pc(
                 product
             )
 
-            item["selected_category"] = category
+            item[
+                "selected_category"
+            ] = category
 
-            result_products.append(item)
+            result_products.append(
+                item
+            )
 
         # ====================================================
         # TOTAL
@@ -1304,19 +1649,32 @@ def build_pc(
 
         elapsed = time.time() - start_time
 
-        print("==========================================")
-        print("SUCCESS")
         print(
-            f"Total price: ৳{total_price:,.0f}"
+            "=========================================="
         )
+
         print(
-            f"Budget: ৳{float(request.budget):,.0f}"
+            "SUCCESS"
         )
+
+        print(
+            f"Total price: "
+            f"৳{total_price:,.0f}"
+        )
+
+        print(
+            f"Budget: "
+            f"৳{float(request.budget):,.0f}"
+        )
+
         print(
             f"Total request time: "
             f"{elapsed:.2f}s"
         )
-        print("==========================================")
+
+        print(
+            "=========================================="
+        )
 
         # ====================================================
         # API RESPONSE
@@ -1324,8 +1682,13 @@ def build_pc(
 
         return {
             "success": True,
-            "message": "PC build generated successfully.",
-            "budget": float(request.budget),
+            "message": (
+                "PC build generated "
+                "successfully."
+            ),
+            "budget": float(
+                request.budget
+            ),
             "total_price": total_price,
             "products": result_products,
         }
@@ -1343,11 +1706,25 @@ def build_pc(
 
     except Exception as e:
 
-        print("==========================================")
-        print("BUILD PC ERROR")
-        print("==========================================")
-        print(str(e))
-        print("==========================================")
+        print(
+            "=========================================="
+        )
+
+        print(
+            "BUILD PC ERROR"
+        )
+
+        print(
+            "=========================================="
+        )
+
+        print(
+            str(e)
+        )
+
+        print(
+            "=========================================="
+        )
 
         raise HTTPException(
             status_code=500,
@@ -1361,12 +1738,14 @@ def build_pc(
     finally:
 
         if cursor is not None:
+
             try:
                 cursor.close()
             except Exception:
                 pass
 
         if connection is not None:
+
             try:
                 connection.close()
             except Exception:
