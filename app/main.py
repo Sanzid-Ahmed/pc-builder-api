@@ -10,6 +10,8 @@ from .build_router import router as build_router
 from .user_router import router as user_router
 from .build_limit_router import router as build_limit_router
 
+from .order_router import router as order_router
+
 
 # ==========================================
 # Create FastAPI App
@@ -50,6 +52,9 @@ app.include_router(user_router)
 
 # Build Limit API
 app.include_router(build_limit_router)
+
+# Order API
+app.include_router(order_router)
 
 
 # ==========================================
