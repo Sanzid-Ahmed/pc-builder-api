@@ -2,6 +2,11 @@
 # Main FastAPI Application
 # ==========================================
 
+from dotenv import load_dotenv
+
+# Load .env BEFORE importing routers
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,8 +14,8 @@ from .routes import router
 from .build_router import router as build_router
 from .user_router import router as user_router
 from .build_limit_router import router as build_limit_router
-
 from .order_router import router as order_router
+from .custom_build_ai_routes import router as custom_build_ai_router
 
 
 # ==========================================
@@ -19,7 +24,10 @@ from .order_router import router as order_router
 
 app = FastAPI(
     title="PC Builder API",
-    description="API for PC component/product data, PC building, user management, and build limits",
+    description=(
+        "API for PC component/product data, PC building, "
+        "user management, build limits, orders, and AI PC building"
+    ),
     version="1.0.0"
 )
 
@@ -55,6 +63,9 @@ app.include_router(build_limit_router)
 
 # Order API
 app.include_router(order_router)
+
+# AI Custom Build API
+app.include_router(custom_build_ai_router)
 
 
 # ==========================================
