@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
+
 from .database import get_connection
 
 
@@ -235,6 +236,7 @@ def get_user_orders(firebase_id: str):
     cursor = None
 
     try:
+
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
@@ -276,17 +278,12 @@ def get_user_orders(firebase_id: str):
                 op.quantity,
                 p.name AS product_name,
                 p.images AS product_images
-
             FROM orders o
-
             JOIN order_products op
                 ON o.order_id = op.order_id
-
             JOIN products p
                 ON op.product_id = p.id
-
             WHERE o.user_id = %s
-
             ORDER BY o.created_at DESC
             """,
             (user_id,)
@@ -305,6 +302,7 @@ def get_user_orders(firebase_id: str):
             order_id = row["order_id"]
 
             if order_id not in orders:
+
                 orders[order_id] = {
                     "order_id": order_id,
                     "status": row["status"],
@@ -313,11 +311,15 @@ def get_user_orders(firebase_id: str):
                 }
 
             orders[order_id]["products"].append({
+
                 "product_id": row["product_id"],
                 "product_name": row["product_name"],
-                "product_price": float(row["product_price"]),
+                "product_price": float(
+                    row["product_price"]
+                ),
                 "quantity": row["quantity"],
                 "product_images": row["product_images"]
+
             })
 
         return {
@@ -326,21 +328,23 @@ def get_user_orders(firebase_id: str):
         }
 
     except HTTPException:
+
         raise
 
     except Exception as e:
+
         raise HTTPException(
             status_code=500,
             detail=f"Database error: {str(e)}"
         )
 
     finally:
+
         if cursor:
             cursor.close()
 
         if connection:
             connection.close()
-
 
 
 # =========================================================
@@ -354,6 +358,7 @@ def get_all_orders():
     cursor = None
 
     try:
+
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
@@ -365,28 +370,20 @@ def get_all_orders():
                 o.user_firebase_id,
                 o.status,
                 o.created_at,
-
                 u.name AS user_name,
                 u.email AS user_email,
-
                 op.product_id,
                 op.product_price,
                 op.quantity,
-
                 p.name AS product_name,
                 p.images AS product_images
-
             FROM orders o
-
             JOIN users u
                 ON o.user_id = u.id
-
             JOIN order_products op
                 ON o.order_id = op.order_id
-
             JOIN products p
                 ON op.product_id = p.id
-
             ORDER BY o.created_at DESC
             """
         )
@@ -402,6 +399,7 @@ def get_all_orders():
             if order_id not in orders:
 
                 orders[order_id] = {
+
                     "order_id": order_id,
                     "user_id": row["user_id"],
                     "firebase_id": row["user_firebase_id"],
@@ -411,17 +409,23 @@ def get_all_orders():
                     "created_at": row["created_at"],
                     "products": [],
                     "total_price": 0
+
                 }
 
-            product_price = float(row["product_price"])
+            product_price = float(
+                row["product_price"]
+            )
+
             quantity = row["quantity"]
 
             orders[order_id]["products"].append({
+
                 "product_id": row["product_id"],
                 "product_name": row["product_name"],
                 "product_price": product_price,
                 "quantity": quantity,
                 "product_images": row["product_images"]
+
             })
 
             orders[order_id]["total_price"] += (
@@ -429,8 +433,10 @@ def get_all_orders():
             )
 
         return {
+
             "success": True,
             "orders": list(orders.values())
+
         }
 
     except Exception as e:
@@ -448,6 +454,7 @@ def get_all_orders():
         if connection:
             connection.close()
 
+
 # =========================================================
 # GET SINGLE ORDER - ADMIN
 # =========================================================
@@ -459,6 +466,7 @@ def get_order_details(order_id: int):
     cursor = None
 
     try:
+
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
 
@@ -470,28 +478,20 @@ def get_order_details(order_id: int):
                 o.user_firebase_id,
                 o.status,
                 o.created_at,
-
                 u.name AS user_name,
                 u.email AS user_email,
-
                 op.product_id,
                 op.product_price,
                 op.quantity,
-
                 p.name AS product_name,
                 p.images AS product_images
-
             FROM orders o
-
             JOIN users u
                 ON o.user_id = u.id
-
             JOIN order_products op
                 ON o.order_id = op.order_id
-
             JOIN products p
                 ON op.product_id = p.id
-
             WHERE o.order_id = %s
             """,
             (order_id,)
@@ -500,6 +500,7 @@ def get_order_details(order_id: int):
         rows = cursor.fetchall()
 
         if not rows:
+
             raise HTTPException(
                 status_code=404,
                 detail="Order not found."
@@ -508,6 +509,7 @@ def get_order_details(order_id: int):
         first_row = rows[0]
 
         order = {
+
             "order_id": first_row["order_id"],
             "user_id": first_row["user_id"],
             "firebase_id": first_row["user_firebase_id"],
@@ -517,19 +519,25 @@ def get_order_details(order_id: int):
             "created_at": first_row["created_at"],
             "products": [],
             "total_price": 0
+
         }
 
         for row in rows:
 
-            product_price = float(row["product_price"])
+            product_price = float(
+                row["product_price"]
+            )
+
             quantity = row["quantity"]
 
             order["products"].append({
+
                 "product_id": row["product_id"],
                 "product_name": row["product_name"],
                 "product_price": product_price,
                 "quantity": quantity,
                 "product_images": row["product_images"]
+
             })
 
             order["total_price"] += (
@@ -537,20 +545,25 @@ def get_order_details(order_id: int):
             )
 
         return {
+
             "success": True,
             "order": order
+
         }
 
     except HTTPException:
+
         raise
 
     except Exception as e:
+
         raise HTTPException(
             status_code=500,
             detail=f"Database error: {str(e)}"
         )
 
     finally:
+
         if cursor:
             cursor.close()
 
@@ -577,6 +590,10 @@ def update_order_status(
 
     try:
 
+        # -------------------------------------------------
+        # Allowed statuses
+        # -------------------------------------------------
+
         allowed_statuses = [
             "pending",
             "accepted",
@@ -585,6 +602,7 @@ def update_order_status(
         ]
 
         if status_update.status not in allowed_statuses:
+
             raise HTTPException(
                 status_code=400,
                 detail="Invalid order status."
@@ -609,6 +627,7 @@ def update_order_status(
         order = cursor.fetchone()
 
         if not order:
+
             raise HTTPException(
                 status_code=404,
                 detail="Order not found."
@@ -633,18 +652,23 @@ def update_order_status(
         connection.commit()
 
         return {
+
             "success": True,
             "message": "Order status updated successfully.",
             "order_id": order_id,
             "status": status_update.status
+
         }
 
     except HTTPException:
+
         if connection:
             connection.rollback()
+
         raise
 
     except Exception as e:
+
         if connection:
             connection.rollback()
 
@@ -654,6 +678,112 @@ def update_order_status(
         )
 
     finally:
+
+        if cursor:
+            cursor.close()
+
+        if connection:
+            connection.close()
+
+
+# =========================================================
+# DELETE ORDER - ADMIN
+# =========================================================
+
+@router.delete("/{order_id}")
+def delete_order(order_id: int):
+
+    connection = None
+    cursor = None
+
+    try:
+
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        # -------------------------------------------------
+        # 1. Check order exists
+        # -------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT order_id
+            FROM orders
+            WHERE order_id = %s
+            """,
+            (order_id,)
+        )
+
+        order = cursor.fetchone()
+
+        if not order:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found."
+            )
+
+        # -------------------------------------------------
+        # 2. Delete order products
+        # -------------------------------------------------
+
+        cursor.execute(
+            """
+            DELETE FROM order_products
+            WHERE order_id = %s
+            """,
+            (order_id,)
+        )
+
+        # -------------------------------------------------
+        # 3. Delete order
+        # -------------------------------------------------
+
+        cursor.execute(
+            """
+            DELETE FROM orders
+            WHERE order_id = %s
+            """,
+            (order_id,)
+        )
+
+        # -------------------------------------------------
+        # 4. Save changes
+        # -------------------------------------------------
+
+        connection.commit()
+
+        # -------------------------------------------------
+        # 5. Return result
+        # -------------------------------------------------
+
+        return {
+
+            "success": True,
+            "message": "Order deleted successfully.",
+            "order_id": order_id
+
+        }
+
+    except HTTPException:
+
+        if connection:
+            connection.rollback()
+
+        raise
+
+    except Exception as e:
+
+        if connection:
+            connection.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {str(e)}"
+        )
+
+    finally:
+
         if cursor:
             cursor.close()
 
